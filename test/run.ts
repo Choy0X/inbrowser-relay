@@ -540,6 +540,73 @@ async function testPipeShutdown(): Promise<void> {
   }
 }
 
+async function testPipeChunking(): Promise<void> {
+  section("Large-payload chunking");
+
+  // Client -> proxy: one large incoming WebSocket message must reach the
+  // destination socket as several bounded writes, in order - not one huge
+  // one, which is the thing observed to fail outright against a real
+  // cloudflare:sockets writable stream (see the comment on
+  // MAX_SOCKET_CHUNK_BYTES in pipe.ts).
+  {
+    const ws = new EventTarget();
+    Object.assign(ws, { send() {}, close() {} });
+    const writes: Uint8Array[] = [];
+    const socket = {
+      readable: new ReadableStream<Uint8Array>({ start() {} }),
+      writable: new WritableStream<Uint8Array>({ write(chunk) { writes.push(chunk); } }),
+      close() { return Promise.resolve(); },
+    };
+    void pipe(ws as unknown as WebSocket, socket, new Uint8Array());
+    const big = new Uint8Array(300 * 1024);
+    for (let i = 0; i < big.length; i++) big[i] = i % 256;
+    ws.dispatchEvent(new MessageEvent("message", { data: big.buffer }));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    check("a large client write is split into more than one piece", writes.length > 1);
+    check("no single piece exceeds 64 KiB", writes.every(w => w.length <= 64 * 1024));
+    const reassembled = concat(writes);
+    check("the split pieces carry every byte in order", bytesEqual(reassembled, big));
+  }
+
+  // Proxy -> client: one large read from the destination socket must reach
+  // the browser-side WebSocket as several bounded sends, in order.
+  {
+    const sent: Uint8Array[] = [];
+    const ws = new EventTarget();
+    Object.assign(ws, { send: (data: Uint8Array) => { sent.push(data); }, close() {} });
+    let source!: ReadableStreamDefaultController<Uint8Array>;
+    const socket = {
+      readable: new ReadableStream<Uint8Array>({ start(controller) { source = controller; } }),
+      writable: new WritableStream<Uint8Array>(),
+      close() { return Promise.resolve(); },
+    };
+    void pipe(ws as unknown as WebSocket, socket, new Uint8Array());
+    const big = new Uint8Array(300 * 1024);
+    for (let i = 0; i < big.length; i++) big[i] = (i * 7) % 256;
+    source.enqueue(big);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    check("a large proxy response is split into more than one send", sent.length > 1);
+    check("no single send exceeds 64 KiB", sent.every(s => s.length <= 64 * 1024));
+    const reassembled = concat(sent);
+    check("the split sends carry every byte in order", bytesEqual(reassembled, big));
+  }
+}
+
+function concat(pieces: Uint8Array[]): Uint8Array {
+  const total = pieces.reduce((n, p) => n + p.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const p of pieces) {
+    out.set(p, offset);
+    offset += p.length;
+  }
+  return out;
+}
+
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
 async function main(): Promise<void> {
   console.log("inbrowser-relay test suite - no network required\n");
   try {
@@ -548,6 +615,7 @@ async function main(): Promise<void> {
     await testCrypto();
     await testConformance();
     await testPipeShutdown();
+    await testPipeChunking();
     testLayering();
   } catch (err) {
     failures++;

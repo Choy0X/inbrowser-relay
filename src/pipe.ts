@@ -33,6 +33,32 @@ export const DEFAULT_LIMITS: PipeLimits = {
   idleMs: 60 * 1000,
 };
 
+/**
+ * Neither `cloudflare:sockets`' writable-stream `write()` nor a Worker's own
+ * outgoing WebSocket `send()` has a documented per-call size ceiling, but a
+ * single very large call to either is the one thing observed to fail
+ * outright (the write rejects, or the message never arrives) rather than
+ * simply queuing or backpressuring like a normal stream. An uploaded image's
+ * bytes arrive here as far fewer, far larger WebSocket messages than a plain
+ * text turn ever produces - segmenting anything over this size before handing
+ * it to either primitive removes the failure mode entirely at the cost of a
+ * few extra small writes, and is invisible to both ends: the proxy and the
+ * VPS relay each just see the same bytes, in the same order, as more/smaller
+ * pieces instead of one large one.
+ */
+const MAX_SOCKET_CHUNK_BYTES = 64 * 1024;
+
+/** Yields `data` in `MAX_SOCKET_CHUNK_BYTES`-sized pieces, unchanged if already smaller. */
+function* chunked(data: Uint8Array): Generator<Uint8Array> {
+  if (data.length <= MAX_SOCKET_CHUNK_BYTES) {
+    yield data;
+    return;
+  }
+  for (let offset = 0; offset < data.length; offset += MAX_SOCKET_CHUNK_BYTES) {
+    yield data.subarray(offset, offset + MAX_SOCKET_CHUNK_BYTES);
+  }
+}
+
 interface Sock {
   readable: ReadableStream<Uint8Array>;
   writable: WritableStream<Uint8Array>;
@@ -92,7 +118,7 @@ export function pipe(ws: WebSocket, socket: Sock, leftover: Uint8Array, limits: 
   // Bytes the proxy coalesced onto the end of its handshake reply. They are the
   // first bytes of the tunnel and go out before anything read afterwards.
   if (leftover.length > 0 && count(leftover.length)) {
-    ws.send(leftover);
+    for (const piece of chunked(leftover)) ws.send(piece);
   }
 
   // Proxy -> client.
@@ -106,7 +132,7 @@ export function pipe(ws: WebSocket, socket: Sock, leftover: Uint8Array, limits: 
         if (!count(value.length)) return;
         touch();
         if (closed) return;
-        ws.send(value);
+        for (const piece of chunked(value)) ws.send(piece);
       }
       shutdown(1000);
     } catch {
@@ -133,10 +159,16 @@ export function pipe(ws: WebSocket, socket: Sock, leftover: Uint8Array, limits: 
     const chunk = new Uint8Array(data as ArrayBuffer);
     if (!count(chunk.length)) return;
     touch();
-    writeChain = writeChain.then(
-      () => (closed ? undefined : writer.write(chunk)),
-      () => undefined
-    ).catch(() => shutdown(RelayClose.UPSTREAM_CLOSED));
+    // Segmented so no single `writer.write()` call carries more than
+    // MAX_SOCKET_CHUNK_BYTES - see the comment on that constant. Each piece
+    // is still chained after the last, preserving the ordering the comment
+    // at the top of this file requires.
+    for (const piece of chunked(chunk)) {
+      writeChain = writeChain.then(
+        () => (closed ? undefined : writer.write(piece)),
+        () => undefined
+      ).catch(() => shutdown(RelayClose.UPSTREAM_CLOSED));
+    }
   });
 
   ws.addEventListener("close", () => shutdown(1000));
