@@ -1,0 +1,43 @@
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+# WebSocket compression is on by default from compatibility_date 2023-08-15
+# onward. Every byte here is either a sealed dial frame or
+# the VPS's own TLS session with the provider - already high entropy, so
+# compression buys nothing.
+# Complete peer-initiated close handshakes in the runtime, including when the
+# VPS abandons a tunnel after rejecting the provider's TLS certificate. Older
+# compatibility dates require an explicit opt-in; keep the date unchanged to
+# avoid enabling unrelated runtime changes. Application close handlers still
+# release TCP resources and enforce limits.
+# https://developers.cloudflare.com/workers/observability/errors/
+compatibility_flags = ["no_web_socket_compression", "web_socket_auto_reply_to_close"]
+
+# Never turn this on. The app tells users in PrivacyPolicyContent.tsx that this
+# component keeps no record of what passes through it; request logs would make
+# that claim false. See the header comment in src/index.ts.
+logpush = false
+
+[vars]
+# Comma-separated. Each entry is a full origin ("https://inbrowser.tech"), a
+# bare host ("inbrowser.tech", any scheme), or a wildcard ("*.inbrowser.tech",
+# which covers that host AND anything beneath it - see isOriginAllowed in
+# src/dial.ts for why the apex is included rather than excluded).
+#
+# Empty allows any origin, which is the right default for a self-hosted relay.
+# Self-hosters running their own app on their own domain should set it to
+# theirs. Note this is a floor, not a boundary: a browser cannot forge Origin
+# but any non-browser client can, and a request with no Origin header at all
+# is not subject to it. RELAY_SECRET is the control that actually matters.
+ALLOWED_ORIGINS = "*.inbrowser.tech"
+
+# RELAY_SECRET is a secret, not a var:
+#   openssl rand -hex 32 | npx wrangler secret put RELAY_SECRET
+# The same value goes in the VPS relay's environment. Without it, a dial cannot
+# be sealed, so a publicly reachable Worker is still not an open relay.
+
+[[unsafe.bindings]]
+name = "DIAL_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }

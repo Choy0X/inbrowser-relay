@@ -1,0 +1,63 @@
+Copyright (c) 2026 Choy0X
+
+This license applies to the original source code and content of this
+repository ("the Software"). It does not apply to third-party
+dependencies, libraries, or bundled binaries used by the Software, which
+remain under their own respective licenses (see package-lock.json and
+node_modules for the full list). Notably: wasi-sh bundles a GPL-2.0
+busybox.wasm binary, several @php-wasm/* packages are GPL-2.0-or-later,
+and several @zenfs/* packages are LGPL-3.0-or-later.
+
+1. GRANT OF RIGHTS
+
+Permission is granted, free of charge, to any person obtaining a copy of
+the Software to use, copy, modify, merge, and distribute copies of the
+Software, subject to the conditions below.
+
+2. ATTRIBUTION REQUIRED
+
+Any copy, fork, or derivative of the Software - modified or unmodified -
+must:
+  a. Retain this license text and the copyright notice above in the
+     source code; and
+  b. Display visible credit to Choy0X (e.g. "Built on InBrowser by
+     Choy0X", linking to https://github.com/Choy0X/Inbrowser where
+     reasonably possible) somewhere a user of that copy or derivative
+     would actually see it - including in any privately hosted or
+     internal deployment, not only a public one.
+
+3. PUBLIC HOSTING AND PUBLICATION RESERVED TO THE AUTHOR
+
+Only Choy0X may publish, deploy, host, or otherwise make the Software (or
+a derivative of it) available at a public URL, domain, app store listing,
+or any other channel through which members of the general public can
+access or use it, without first obtaining written permission from Choy0X.
+
+This does NOT restrict the right to:
+  - Clone, download, or fork the Software;
+  - Run the Software privately - locally, on a personal device, or on an
+    internal network not reachable by the general public;
+  - Modify the Software for personal or internal use; or
+  - Contribute changes back to the original repository.
+
+It DOES restrict:
+  - Deploying a copy or derivative to a publicly reachable website,
+    domain, or app listing intended for use by anyone other than
+    yourself, without the Author's written permission.
+
+4. THIRD-PARTY COMPONENTS
+
+This license governs only the original code and assets in this
+repository. Bundled or referenced third-party software is licensed
+separately by its own authors and is unaffected by the terms above.
+Redistributing this repository together with its GPL/LGPL-licensed
+components (see above) may carry additional obligations under those
+licenses; this document does not resolve that and is not legal advice.
+
+5. NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING
+FROM THE SOFTWARE OR ITS USE.

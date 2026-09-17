@@ -1,0 +1,24 @@
+{
+  "name": "inbrowser-relay",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "esbuild test/run.ts --bundle --platform=node --format=esm --target=node20 --outfile=node_modules/.cache/relay-test.mjs --log-level=error && node node_modules/.cache/relay-test.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250204.0",
+    "typescript": "^5.6.3",
+    "wrangler": "^3.99.0",
+    "esbuild": "^0.25.0",
+    "@types/node": "^22.10.0"
+  },
+  "description": "Zero-knowledge egress pipe for InBrowser proxy support. Dials a user-supplied HTTP/SOCKS proxy from Cloudflare so the relay behind it is never exposed.",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Choy0X/inbrowser-relay.git"
+  }
+}
