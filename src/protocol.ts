@@ -56,6 +56,17 @@ export interface DialRequest {
   password?: string;
   /** Where the proxy should be asked to connect. */
   target: { host: string; port: number };
+  /**
+   * Opaque per-user rate-limit bucket. Optional, and the Worker falls back to
+   * the connecting address when it is absent - which is what makes adding it a
+   * compatible change rather than a flag day: an older relay simply does not
+   * send it, and an older Worker simply ignores it.
+   *
+   * It is NOT an identifier the Worker can resolve to a person from anything it
+   * observes; see deriveBucket in crypto.ts for exactly what that is and is not
+   * worth.
+   */
+  bucket?: string;
 }
 
 /**

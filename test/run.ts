@@ -484,6 +484,40 @@ function testLayering(): void {
 
   const wrangler = readFileSync(join(ROOT, "wrangler.toml"), "utf8");
   check("logpush is disabled", /logpush\s*=\s*false/.test(wrangler));
+
+  // The dial budget. Keying the per-user limiter on cf-connecting-ip made it a
+  // single global budget, because every dial arrives from the relay's one
+  // machine - so these check the shape that replaced it, not just that some
+  // limiter exists.
+  check("a per-user dial limiter is bound", /name\s*=\s*"DIAL_LIMITER"/.test(wrangler));
+  check("a global backstop limiter is bound", /name\s*=\s*"GLOBAL_DIAL_LIMITER"/.test(wrangler));
+
+  const namespaces = [...wrangler.matchAll(/namespace_id\s*=\s*"(\d+)"/g)].map((m) => m[1]);
+  check(
+    "the two limiters have distinct namespaces",
+    namespaces.length >= 2 && new Set(namespaces).size === namespaces.length,
+    namespaces.join(", ")
+  );
+
+  // Cloudflare accepts only these two windows, and a typo is accepted silently
+  // at deploy time rather than rejected.
+  const periods = [...wrangler.matchAll(/period\s*=\s*(\d+)/g)].map((m) => Number(m[1]));
+  check(
+    "every limiter window is one Cloudflare accepts",
+    periods.length >= 2 && periods.every((p) => p === 10 || p === 60),
+    periods.join(", ")
+  );
+
+  check(
+    "the entry no longer keys a limiter on the connecting address",
+    !/DIAL_LIMITER[\s\S]{0,200}cf-connecting-ip/.test(entry)
+  );
+  check("the dial's bucket is what keys the per-user limiter", /DIAL_LIMITER\.limit\(\{ key \}\)/.test(entry));
+  check(
+    "both limiters share one timeout rather than adding two to the open path",
+    /withTimeout\(Promise\.all\(checks\)/.test(entry)
+  );
+  check("the bucket is never logged", !/console\.[a-z]+\([^)]*bucket/i.test(entry));
 }
 
 // ------------------------------------------------------------------- main

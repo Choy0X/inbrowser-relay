@@ -47,8 +47,26 @@ export interface Env {
   RELAY_SECRET: string;
   /** Comma-separated origins allowed to open a tunnel. Empty allows any, for self-hosters. */
   ALLOWED_ORIGINS?: string;
-  /** Optional Cloudflare rate-limit binding, keyed on the VPS address. */
-  DIAL_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  /**
+   * Per-user dial budget, keyed on the opaque bucket inside the sealed dial.
+   *
+   * This USED to be keyed on cf-connecting-ip, which was wrong in a way that
+   * was invisible until it mattered: every dial reaches this Worker from the
+   * relay's one machine, so the limit was not per-user at all - it was a single
+   * budget shared by every user of the platform at once. A single client
+   * scanning a proxy list could exhaust it for everybody.
+   */
+  DIAL_LIMITER?: RateLimiter;
+  /**
+   * Platform-wide backstop, keyed on a constant. Sized far above normal
+   * traffic; it exists to stop a runaway retry loop turning into unbounded
+   * spend and unbounded connection attempts, not to shape ordinary use.
+   */
+  GLOBAL_DIAL_LIMITER?: RateLimiter;
+}
+
+interface RateLimiter {
+  limit(options: { key: string }): Promise<{ success: boolean }>;
 }
 
 /** `http` and `https` share the CONNECT bytes; only the socket underneath differs. */
@@ -115,27 +133,12 @@ export default {
       return new Response("Origin not allowed", { status: 403, headers: corsHeaders() });
     }
 
-    if (env.DIAL_LIMITER) {
-      // DIAL_LIMITER is declared via wrangler.toml's [[unsafe.bindings]] -
-      // wrangler itself warns at deploy time that "unsafe" fields are
-      // experimental and may change or break at any time. This is the only
-      // await before the WebSocket exists and the response is returned, so a
-      // slow or hung binding here stalls the whole invocation with nothing
-      // to react to - exactly the "Worker's code had hung" failure, observed
-      // in production. Bounded and fail-open: RELAY_SECRET is the control
-      // that actually matters (see the Origin check above for the same
-      // reasoning), this is defense in depth, not the thing standing between
-      // the relay and abuse.
-      const key = request.headers.get("cf-connecting-ip") ?? "unknown";
-      try {
-        const { success } = await withTimeout(env.DIAL_LIMITER.limit({ key }), RATE_LIMIT_TIMEOUT_MS);
-        if (!success) {
-          return new Response("Too many requests", { status: 429, headers: corsHeaders() });
-        }
-      } catch {
-        /* fail open - see comment above */
-      }
-    }
+    // The rate limiting used to happen here, keyed on the connecting address.
+    // It now happens in runSession() instead, because the key it needs is
+    // inside the sealed dial and cannot be read until that frame arrives. See
+    // checkRateLimits below. Nothing is awaited before the upgrade any more,
+    // which also removes the one place a slow binding could stall the whole
+    // invocation before there was anything to react to.
 
     if (!env.RELAY_SECRET) {
       return new Response("Relay is not configured", { status: 503, headers: corsHeaders() });
@@ -216,6 +219,8 @@ async function runSession(ws: WebSocket, env: Env): Promise<void> {
     return;
   }
 
+  if (!(await checkRateLimits(env, ws, dial.bucket))) return;
+
   // `secureTransport: "on"` is what makes an https:// proxy work: the hop to the
   // proxy is TLS here, and the VPS layers the provider's TLS inside the tunnel.
   // Neither side is ever asked for TLS-in-TLS, which workerd cannot do.
@@ -270,6 +275,70 @@ async function runSession(ws: WebSocket, env: Env): Promise<void> {
   // Keep the waitUntil task alive through the byte pumps and their async TCP
   // cleanup, including when the VPS closes after a TLS verification failure.
   await pipe(ws, socket, leftover, DEFAULT_LIMITS);
+}
+
+/**
+ * The two dial budgets: one for this user, one for the platform.
+ *
+ * Both are consulted, and the per-user one first, so an abusive bucket gets an
+ * attributable RATE_LIMITED rather than being lost in a global refusal that
+ * also punishes everyone else. They run concurrently under a SINGLE timeout
+ * rather than sequentially: this is on the path to READY, and two sequential
+ * one-second waits would put two seconds straight into the open latency every
+ * client measures.
+ *
+ * Fail-open, deliberately and for the same reason as before: RELAY_SECRET is
+ * the control that keeps this from being an open relay, and these are defence
+ * in depth. A binding that is slow or broken must not take the relay with it.
+ *
+ * Both bindings are declared through wrangler.toml's [[unsafe.bindings]], which
+ * wrangler itself warns may change without notice - another reason not to make
+ * the relay's availability depend on them.
+ *
+ * Returns false when the dial was refused; the caller then stops.
+ */
+async function checkRateLimits(env: Env, ws: WebSocket, bucket: string | undefined): Promise<boolean> {
+  const checks: Promise<{ which: "user" | "global"; success: boolean }>[] = [];
+
+  if (env.DIAL_LIMITER) {
+    // Falling back to a constant when the dial carries no bucket keeps an
+    // older relay working, at the cost of every such dial sharing one budget -
+    // which is exactly the behaviour this field exists to replace, so it is
+    // the right shape for a fallback and the wrong shape to rely on.
+    const key = bucket ?? "unbucketed";
+    checks.push(env.DIAL_LIMITER.limit({ key }).then(({ success }) => ({ which: "user" as const, success })));
+  }
+  if (env.GLOBAL_DIAL_LIMITER) {
+    checks.push(
+      env.GLOBAL_DIAL_LIMITER.limit({ key: "global" }).then(({ success }) => ({ which: "global" as const, success }))
+    );
+  }
+  if (checks.length === 0) return true;
+
+  let results: { which: "user" | "global"; success: boolean }[];
+  try {
+    results = await withTimeout(Promise.all(checks), RATE_LIMIT_TIMEOUT_MS);
+  } catch {
+    return true; // fail open - see above
+  }
+
+  const refused = results.find((r) => !r.success);
+  if (!refused) return true;
+
+  try {
+    ws.send(
+      encodeErrorFrame(
+        RelayClose.RATE_LIMITED,
+        refused.which === "user"
+          ? "Too many proxy connections from this browser. Try again shortly."
+          : "The relay is busy. Try again shortly."
+      )
+    );
+    ws.close(RelayClose.RATE_LIMITED, "rate limited");
+  } catch {
+    /* peer already gone */
+  }
+  return false;
 }
 
 /**

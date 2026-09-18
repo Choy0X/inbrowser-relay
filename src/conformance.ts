@@ -36,12 +36,13 @@ export const VECTOR_SECRET = "inbrowser-relay-conformance-vector-secret-0001";
  * production always uses a random one.
  */
 export const VECTOR_FRAME_HEX =
-  "010102030405060708090a0b0c81ff68f20d1e839b07ba645012e8c183c9577f46815e36a433dbbd7aa7ccc1769" +
-  "61bffe368946aa0b9302d5c1219b8e44d0efe2f3d050f5ea896b04252b4a342c8703a50f223ed036bb89582e18f" +
-  "3c063e8ee194fc29fc15d41d78d0e97efd9b09f82c5610c8d07bc4cd7ff0dad32d0779bc13a318b37006e4b10d3" +
-  "d688987ee438b9ca2b078fe08b187383ab6d0cee857bbde04f34bd9adc4443d8ad4dcac359321c6781aae8d57d5" +
-  "80a3796aceb10f820087196ef6a3ed6f1c81c329856d4816f23fded9ab4a2386f2c52e4d3811fc1e6d12fa08c5e" +
-  "5a5b479e24a04193d6e014f5fd2072089cc5489d2";
+  "010102030405060708090a0b0c81ff68f20d1e839b07ba645012e8c183c9577f46815e36a433dbbd7aa7ccc176" +
+  "961bffe368946aa0b9302d5c1219b8e44d0efe2f3d050f5ea896b04252b4a342c8703a50f223ed036bb89582e1" +
+  "8f3c063e8ee194fc29fc15d41d78d0e97efd9b09f82c5610c8d07bc4cd7ff0dad32d0779bc13a318b37006e4b1" +
+  "0d3d688987ee438b9ca2b078fe08b187383ab6d0cee857bbde04f34bd9adc4443d8ad4dcac359321c6781aae8d" +
+  "57d580a3796aceb10f820087196ef6a3ed6f1c81c329856d4816f23fded9ab4a2386f2c52e4d3811fc1e6d12fa" +
+  "08c5e5a5b479b386cd3b5d28dea66bca928b98a517f558522b5255cb9531471a1b3c806d2a34e615012c3a70a9" +
+  "ff1c5cbea24422dfa46b7a64";
 
 /** What opening VECTOR_FRAME_HEX must yield. */
 export const EXPECTED_DIAL = {
@@ -53,6 +54,7 @@ export const EXPECTED_DIAL = {
   username: "vector-user",
   password: "vector-pass",
   target: { host: "api.example.com", port: 443 },
+  bucket: "vector-bucket-key-0001",
 } as const;
 
 export function vectorFrame(): Uint8Array {

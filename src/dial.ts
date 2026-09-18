@@ -220,7 +220,19 @@ export function validateDial(dial: DialRequest): DialRejection | null {
   if (isBlockedHost(target.host)) {
     return { code: RelayClose.TARGET_NOT_ALLOWED, message: "The target address is a local or reserved address." };
   }
+  // The bucket is inside the seal, so a malformed one means the relay has a
+  // bug rather than that somebody is probing - but it is used as a rate-limit
+  // key, and an unbounded or oddly-shaped key is not something to hand to a
+  // binding unchecked.
+  if (dial.bucket !== undefined && !isValidBucket(dial.bucket)) {
+    return { code: RelayClose.DIAL_REJECTED, message: "The dial carried a malformed rate-limit key." };
+  }
   return null;
+}
+
+/** base64url, and short. deriveBucket on the relay side emits 22 characters. */
+function isValidBucket(value: unknown): boolean {
+  return typeof value === "string" && value.length > 0 && value.length <= 64 && /^[A-Za-z0-9_-]+$/.test(value);
 }
 
 /**

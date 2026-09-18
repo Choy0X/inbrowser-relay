@@ -47,8 +47,38 @@ ALLOWED_ORIGINS = "*.inbrowser.tech"
 # The same value goes in the VPS relay's environment. Without it, a dial cannot
 # be sealed, so a publicly reachable Worker is still not an open relay.
 
+# Per-user, keyed on the opaque bucket carried inside the sealed dial.
+#
+# This was 60/60s keyed on cf-connecting-ip, which was not a per-user limit at
+# all: every dial arrives from the relay's single machine, so it was one budget
+# shared by every user of the platform - about one dial per second in total, and
+# a single client scanning a proxy list could consume all of it.
+#
+# 120/60s deliberately MATCHES the relay's own rateLimitPerMinute rather than
+# sitting under it. One /v1/fetch produces at most one dial, so the relay's
+# limiter is already the user-facing constraint; this one exists as a backstop
+# in case that is bypassed, and a tighter value here would only produce
+# confusing worker_rate_limited errors for users the relay already admitted.
+#
+# Cloudflare counts these per location and only eventually consistently, so the
+# real ceiling is this number times however many colos the relay reaches. That
+# is fine for a backstop and would not be fine for accounting.
 [[unsafe.bindings]]
 name = "DIAL_LIMITER"
 type = "ratelimit"
 namespace_id = "1001"
-simple = { limit = 60, period = 60 }
+simple = { limit = 120, period = 60 }
+
+# Platform-wide backstop, keyed on a constant.
+#
+# period = 10 rather than 60 on purpose: `period` may only be 10 or 60, and the
+# shorter window is what bounds a BURST. 6000/60s would happily allow all 6000
+# in the first second; 1000/10s holds the sustained rate near 100/s, which is
+# comfortably above the target and still stops a runaway retry loop turning
+# into unbounded Workers spend and unbounded connection attempts against
+# whatever proxy happens to be configured.
+[[unsafe.bindings]]
+name = "GLOBAL_DIAL_LIMITER"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 1000, period = 10 }
