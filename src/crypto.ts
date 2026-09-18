@@ -32,12 +32,36 @@ const decoder = new TextDecoder();
 /** Domain separation, so the same secret could safely derive other keys later. */
 const HKDF_INFO = encoder.encode("inbrowser-relay-dial-v1");
 
+/** Derived keys, by secret. See deriveDialKey below for why this exists. */
+const dialKeyCache = new Map<string, Promise<CryptoKey>>();
+
 /**
  * HKDF-SHA256 over RELAY_SECRET. No salt: the secret is already high-entropy
  * (the deploy docs specify `openssl rand -hex 32`) and a fixed empty salt keeps
  * both sides derivable from the secret alone, with no extra value to distribute.
+ *
+ * Memoized, because the secret is process-constant and this was running two
+ * WebCrypto operations on every single dial. The cache holds the PROMISE, not
+ * the resolved key, so concurrent callers arriving before the first derivation
+ * settles share it instead of each starting their own - which is the common
+ * case under load, and the whole point. A rejection is evicted rather than
+ * cached: the only way this throws is a secret that fails the length check,
+ * which is deterministic, but a sticky rejected promise would be a miserable
+ * thing to debug if that ever stopped being true.
+ *
+ * Keyed by secret rather than kept in a single slot so a process using more
+ * than one (the test suites do) stays correct.
  */
-export async function deriveDialKey(secret: string): Promise<CryptoKey> {
+export function deriveDialKey(secret: string): Promise<CryptoKey> {
+  const cached = dialKeyCache.get(secret);
+  if (cached) return cached;
+  const pending = deriveDialKeyUncached(secret);
+  dialKeyCache.set(secret, pending);
+  pending.catch(() => dialKeyCache.delete(secret));
+  return pending;
+}
+
+async function deriveDialKeyUncached(secret: string): Promise<CryptoKey> {
   if (!secret || secret.length < 32) {
     throw new Error("RELAY_SECRET must be at least 32 characters. Generate one with: openssl rand -hex 32");
   }

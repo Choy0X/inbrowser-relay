@@ -18,6 +18,17 @@ compatibility_flags = ["no_web_socket_compression", "web_socket_auto_reply_to_cl
 # that claim false. See the header comment in src/index.ts.
 logpush = false
 
+# A Worker holding a WebSocket open is billed on CPU time, not wall clock, so
+# raising this ceiling costs nothing when it is not reached. Leaving it unset
+# means the 30s default, which for a byte pump is a cliff rather than a limit:
+# a high-throughput tunnel hits it and the isolate is hard-killed mid-stream
+# with no ERROR frame, so the VPS sees only an abrupt close and reports a
+# generic failure that points nowhere near the cause. 120s is well inside the
+# 5min paid maximum and well past anything DEFAULT_LIMITS in src/pipe.ts allows
+# a single tunnel to spend.
+[limits]
+cpu_ms = 120000
+
 [vars]
 # Comma-separated. Each entry is a full origin ("https://inbrowser.tech"), a
 # bare host ("inbrowser.tech", any scheme), or a wildcard ("*.inbrowser.tech",
